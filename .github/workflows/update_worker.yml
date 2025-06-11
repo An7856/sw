@@ -38,7 +38,7 @@ jobs:
       - name: 检查或创建README.md
         run: |
           if [ ! -f "README.md" ]; then
-            echo -e "1. **手动强制更新**：\n   - 可以手动找到项目Actions/All workflows/Auto Update Worker/Run workflow选择更新类型和是否强制更新\n2. **自动更新类型，可根据需要自行修改自动更新类型，变量值为**：\n   - 正式版或测试版\n   - 根据项目设置定时触发自动更新\n   - 只有当远程版本更高时才触发更新\n   - 相同版本或更低版本都不触发更新\n3. **版本类型控制**：\n   - 只检查与\"自动更新类型.txt\"设置完全匹配的版本类型\n   - 若指定类型无可用版本，直接退出不尝试其他类型" > README.md
+            echo -e "1. **手动强制更新**：\n   - 可以手动找到项目Actions/All workflows/Auto Update Worker/Run workflow选择更新类型和是否强制更新，手动更新选项可选择是否强制更新（忽略版本比较）\n2. **自动更新类型，可根据需要自行修改自动更新类型，变量值为**：\n   - 正式版或测试版\n   - 根据项目设置定时触发自动更新\n   - 只有当远程版本更高时才触发更新\n   - 相同版本或更低版本都不触发更新\n3. **版本类型控制**：\n   - 只检查与\"自动更新类型.txt\"设置完全匹配的版本类型\n   - 若指定类型无可用版本，直接退出不尝试其他类型\n " > README.md
             echo "已创建README.md文件"
           fi
 
@@ -52,6 +52,7 @@ jobs:
             echo "$UPDATE_TYPE" > "自动更新类型.txt"
             echo "已创建自动更新类型文件，设置为: $UPDATE_TYPE"
           else
+            # 如果手动指定了类型，则更新文件
             if [ -n "${{ github.event.inputs.release-type }}" ]; then
               UPDATE_TYPE="${{ github.event.inputs.release-type }}"
               echo "$UPDATE_TYPE" > "自动更新类型.txt"
@@ -64,6 +65,7 @@ jobs:
           
           echo "VERSION_TYPE=$UPDATE_TYPE" >> $GITHUB_ENV
           [ "$UPDATE_TYPE" = "测试版" ] && echo "IS_PRERELEASE=true" >> $GITHUB_ENV || echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          # 将"是/否"转换为"true/false"
           [ "${{ github.event.inputs.force-update }}" = "是" ] && echo "FORCE_UPDATE=true" >> $GITHUB_ENV || echo "FORCE_UPDATE=false" >> $GITHUB_ENV
 
       - name: 获取当前本地版本
@@ -89,15 +91,18 @@ jobs:
           API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
           RESPONSE=$(curl -s "$API_URL")
           
+          # 获取最新正式版和测试版
           LATEST_STABLE=$(echo "$RESPONSE" | jq -r '[.[] | select(.prerelease == false)][0]')
           LATEST_PRERELEASE=$(echo "$RESPONSE" | jq -r '[.[] | select(.prerelease == true)][0]')
           
+          # 提取版本号
           STABLE_TAG=$(echo "$LATEST_STABLE" | jq -r '.tag_name')
           PRERELEASE_TAG=$(echo "$LATEST_PRERELEASE" | jq -r '.tag_name')
           
           echo "最新正式版: ${STABLE_TAG:-无}"
           echo "最新测试版: ${PRERELEASE_TAG:-无}"
           
+          # 严格根据自动更新类型选择目标版本
           if [ "$VERSION_TYPE" = "正式版" ]; then
             if [ "$LATEST_STABLE" != "null" ]; then
               TARGET_RELEASE=$LATEST_STABLE
@@ -131,49 +136,58 @@ jobs:
           echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
+          # 如果是强制更新，跳过版本比较
           if [ "$FORCE_UPDATE" = "true" ]; then
             echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
-            echo -e "\033[33m[强制更新] 已选择强制更新，忽略版本比较\033[0m"
-          elif [ -n "$LOCAL_VERSION" ]; then
-            if [ "$(printf '%s\n' "$LOCAL_VERSION" "$TAG_NAME" | sort -V | head -n1)" = "$LOCAL_VERSION" ] && \
-               [ "$LOCAL_VERSION" != "$TAG_NAME" ]; then
-              echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
-              echo -e "\033[33m[版本比较] 需要更新: $LOCAL_VERSION → $TAG_NAME\033[0m"
-            else
-              echo "UPDATE_NEEDED=false" >> $GITHUB_ENV
-              echo -e "\033[32m当前版本已是最新或更高版本\033[0m"
-            fi
+            echo -e "\033[33m[强制更新] 已选择强制更新，忽略版本比较，强制更新到 $TAG_NAME\033[0m"
           else
-            echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
-            echo -e "\033[33m首次运行，需要初始化版本\033[0m"
+            # 版本比较：只有当目标版本严格更高时才更新
+            if [ -n "$LOCAL_VERSION" ]; then
+              if [ "$(printf '%s\n' "$LOCAL_VERSION" "$TAG_NAME" | sort -V | head -n1)" = "$LOCAL_VERSION" ] && \
+                 [ "$LOCAL_VERSION" != "$TAG_NAME" ]; then
+                echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
+                echo -e "\033[33m[版本比较] 当前版本($LOCAL_VERSION)低于目标版本($TAG_NAME)，需要更新\033[0m"
+              else
+                echo "UPDATE_NEEDED=false" >> $GITHUB_ENV
+                echo -e "\033[32m当前版本已是最新或更高版本，无需更新\033[0m"
+              fi
+            else
+              echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
+              echo -e "\033[33m首次运行，需要初始化版本\033[0m"
+            fi
           fi
 
       - name: 如果需要，清理旧文件并下载新版本
         if: env.UPDATE_NEEDED == 'true'
         run: |
           echo -e "\033[34m[清理旧文件]\033[0m"
+          # 保护README.md和自动更新类型文件不被删除
           PROTECTED_FILES="README.md 自动更新类型.txt"
           for file in *; do
             if [[ "$PROTECTED_FILES" != *"$file"* ]]; then
+              echo "删除文件: $file"
               rm -rf "$file"
             fi
           done
           
-          echo -e "\033[34m[下载最新版本]\033[0m"
+          echo -e "\033[34m[下载最新 worker.zip]\033[0m"
           wget -O worker.zip "$DOWNLOAD_URL"
+          echo -e "\033[34m[解压 worker.zip]\033[0m"
           unzip worker.zip
+          echo -e "\033[34m[删除 worker.zip]\033[0m"
           rm worker.zip
-          
           echo -e "\033[34m[记录版本信息]\033[0m"
           echo "当前版本: $TAG_NAME" > version.txt
           echo "版本类型: $VERSION_TYPE" >> version.txt
           echo "更新时间: $(date '+%Y-%m-%d %H:%M:%S')" >> version.txt
-          [ "$FORCE_UPDATE" = "true" ] && echo "更新方式: 手动强制更新" >> version.txt
+          if [ "$FORCE_UPDATE" = "true" ]; then
+            echo "更新备注: 手动强制更新" >> version.txt
+          fi
 
       - name: 提交更改
         if: env.UPDATE_NEEDED == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "${{ env.FORCE_UPDATE == 'true' && '强制' || '' }}更新至 ${{ env.TAG_NAME }} (${{ env.VERSION_TYPE }})"
+          commit_message: " ${{ env.FORCE_UPDATE == 'true' && '强制' || '' }}同步最新 Worker 版本：${{ env.TAG_NAME }} (类型: ${{ env.VERSION_TYPE }})"
           commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           push_options: --force
