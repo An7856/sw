@@ -107,7 +107,7 @@ jobs:
           rm worker.zip
           echo -e "\033[34m[记录新版本号]\033[0m"
           echo "$TAG_NAME" > version.txt
-          echo "$VERSION_TYPE" > version_type.txt
+          echo "$VERSION_TYPE" > 可修改自动更新版本变量.txt
 
       - name: 提交更改
         if: env.UPDATE_NEEDED == 'true'
