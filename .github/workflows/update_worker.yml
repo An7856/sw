@@ -41,13 +41,11 @@ jobs:
           echo "LOCAL_VERSION=$LOCAL_VERSION" >> $GITHUB_ENV
           # 根据输入参数设置内部变量
           if [ "${{ github.event.inputs.release-type || '正式版' }}" = "测试版" ]; then
-            echo "UPDATE_TYPE=1" >> $GITHUB_ENV
+            echo "VERSION_TYPE=测试版" >> $GITHUB_ENV
             echo "IS_PRERELEASE=true" >> $GITHUB_ENV
-            echo "TYPE_NAME=测试版" >> $GITHUB_ENV
           else
-            echo "UPDATE_TYPE=0" >> $GITHUB_ENV
+            echo "VERSION_TYPE=正式版" >> $GITHUB_ENV
             echo "IS_PRERELEASE=false" >> $GITHUB_ENV
-            echo "TYPE_NAME=正式版" >> $GITHUB_ENV
           fi
 
       - name: 获取最新 Release 信息
@@ -58,7 +56,7 @@ jobs:
           RESPONSE=$(curl -s "$API_URL")
           
           # 根据更新类型筛选版本
-          if [ "$UPDATE_TYPE" = "0" ]; then
+          if [ "$VERSION_TYPE" = "正式版" ]; then
             echo "正在查找正式版..."
             LATEST_RELEASE=$(echo "$RESPONSE" | jq -r '[.[] | select(.prerelease == false)][0]')
           else
@@ -79,9 +77,10 @@ jobs:
             exit 1
           fi
 
-          echo "最新版本号: $TAG_NAME (类型: $TYPE_NAME)"
+          echo "最新版本号: $TAG_NAME (类型: $VERSION_TYPE)"
           echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          echo "VERSION_TYPE=$VERSION_TYPE" >> $GITHUB_ENV
 
       - name: 判断是否需要更新
         id: check_update
@@ -108,12 +107,12 @@ jobs:
           rm worker.zip
           echo -e "\033[34m[记录新版本号]\033[0m"
           echo "$TAG_NAME" > version.txt
-          echo "$UPDATE_TYPE" > update_type.txt
+          echo "$VERSION_TYPE" > version_type.txt
 
       - name: 提交更改
         if: env.UPDATE_NEEDED == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 自动同步最新 Worker 版本：${{ env.TAG_NAME }} (类型: ${{ env.TYPE_NAME }})"
+          commit_message: "🔄 自动同步最新 Worker 版本：${{ env.TAG_NAME }} (类型: ${{ env.VERSION_TYPE }})"
           commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           push_options: --force
