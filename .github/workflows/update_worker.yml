@@ -38,7 +38,7 @@ jobs:
       - name: 检查或创建README.md
         run: |
           if [ ! -f "README.md" ]; then
-            echo -e "1. **手动强制更新**：\n   - 可以手动找到项目Actions/All workflows/Auto Update Worker/Run workflow选择更新类型和是否强制更新，手动更新选项可选择是否强制更新（忽略版本比较）\n2. **自动更新类型，可根据需要自行修改，变量值为**：\n   - 正式版或测试版\n   - 根据项目设置定时触发自动更新\n   - 只有当远程版本更高时才触发更新\n   - 相同版本或更低版本都不触发更新\n3. **版本类型控制**：\n   - 只检查与\"自动更新类型.txt\"设置完全匹配的版本类型\n   - 若指定类型无可用版本，直接退出不尝试其他类型\n " > README.md
+            echo -e "1. **手动强制更新**：\n   - 可以手动找到项目Actions/All workflows/Auto Update Worker/Run workflow选择更新类型和是否强制更新，手动更新选项可选择是否强制更新（忽略版本比较）\n2. **自动更新类型，可根据需要自行修改，变量值为**：\n   - 正式版或测试版\n   - 根据项目设置定时触发自动更新\n   - 只有当远程版本更高时才触发更新\n   - 相同版本或更低版本都不触发更新\n3. **版本类型控制**：\n   - 只检查与\"自动更新类型.txt\"设置完全匹配的版本类型\n   - 若指定类型无可用版本，直接退出不尝试其他类型\n   - 当设置为测试版时，如果正式版版本更高，会自动更新到正式版\n " > README.md
             echo "已创建README.md文件"
           fi
 
@@ -114,7 +114,22 @@ jobs:
               exit 0
             fi
           else
-            if [ "$LATEST_PRERELEASE" != "null" ]; then
+            # 测试版模式下，检查正式版是否更高
+            if [ "$LATEST_STABLE" != "null" ] && [ "$LATEST_PRERELEASE" != "null" ]; then
+              # 比较正式版和测试版版本号
+              if [ "$(printf '%s\n' "$PRERELEASE_TAG" "$STABLE_TAG" | sort -V | head -n1)" = "$PRERELEASE_TAG" ] && \
+                 [ "$PRERELEASE_TAG" != "$STABLE_TAG" ]; then
+                echo -e "\033[33m[版本比较] 正式版($STABLE_TAG)高于测试版($PRERELEASE_TAG)，优先更新到正式版\033[0m"
+                TARGET_RELEASE=$LATEST_STABLE
+                TAG_NAME=$STABLE_TAG
+                echo "VERSION_TYPE=正式版" >> $GITHUB_ENV  # 临时覆盖版本类型
+                echo "目标版本: 正式版 $TAG_NAME (因版本更高)"
+              else
+                TARGET_RELEASE=$LATEST_PRERELEASE
+                TAG_NAME=$PRERELEASE_TAG
+                echo "目标版本: 测试版 $TAG_NAME"
+              fi
+            elif [ "$LATEST_PRERELEASE" != "null" ]; then
               TARGET_RELEASE=$LATEST_PRERELEASE
               TAG_NAME=$PRERELEASE_TAG
               echo "目标版本: 测试版 $TAG_NAME"
